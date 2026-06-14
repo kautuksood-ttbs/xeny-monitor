@@ -1,0 +1,49 @@
+name: Xeny Monitor Poll
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: xeny-state-never
+          restore-keys: xeny-state-
+      - name: Cache Playwright
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install packages
+        run: pip install playwright pytz schedule
+      - name: Install Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: playwright install --with-deps chromium
+      - name: Install Chromium deps
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: playwright install-deps chromium
+      - name: Run poll
+        env:
+          XENY_EMAIL:    ${{ secrets.XENY_EMAIL }}
+          XENY_PASSWORD: ${{ secrets.XENY_PASSWORD }}
+          SMTP_EMAIL:    ${{ secrets.SMTP_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: python xeny_monitor.py --mode poll
+      - name: Save state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: xeny-state-${{ github.run_id }}
