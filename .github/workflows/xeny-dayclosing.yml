@@ -1,0 +1,53 @@
+name: Xeny Monitor — Day Closing 7AM IST
+
+on:
+  schedule:
+    - cron: '30 1 * * *'    # 1:30 AM UTC = 7:00 AM IST every day
+  workflow_dispatch:          # Allows manual trigger from GitHub website
+
+jobs:
+  dayclosing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Cache Playwright browser
+      - name: Cache Playwright Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Python packages
+        run: pip install playwright pytz schedule
+
+      - name: Install Chromium (first time only — cached after)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: playwright install --with-deps chromium
+
+      - name: Install Chromium system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: playwright install-deps chromium
+
+      - name: Send Day Closing email
+        env:
+          XENY_EMAIL:    ${{ secrets.XENY_EMAIL }}
+          XENY_PASSWORD: ${{ secrets.XENY_PASSWORD }}
+          SMTP_EMAIL:    ${{ secrets.SMTP_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: python xeny_monitor.py --mode dayclosing
