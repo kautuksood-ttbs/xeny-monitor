@@ -48,6 +48,10 @@ ALERT_RECIPIENTS = [
     "Kautuk.sood@technotaskglobal.com",
 ]
 
+ALERT_CC = [
+    "Rajib.Ray@technotaskglobal.com",
+]
+
 IST             = pytz.timezone("Asia/Kolkata")
 BUSINESS_START  = 8   # 8 AM IST — polling window start
 BUSINESS_END    = 22  # 10 PM IST — polling window end
@@ -550,33 +554,34 @@ def client_row(rows: list, name: str) -> dict:
 #  EMAIL SENDER
 # ══════════════════════════════════════════════════════════════
 
-def send_email(subject: str, html: str, to: list = None):
+def send_email(subject: str, html: str, to: list = None, cc: list = None):
     recipients = to or ALERT_RECIPIENTS
+    cc_list    = cc or ALERT_CC
     try:
         msg = MIMEMultipart("alternative")
         msg["From"]    = f"Xeny Monitor <{SMTP_EMAIL}>"
         msg["To"]      = ", ".join(recipients)
+        msg["Cc"]      = ", ".join(cc_list)
         msg["Subject"] = subject
         msg.attach(MIMEText(html, "html", "utf-8"))
 
         # Auto-detect SMTP server from email domain
         domain = SMTP_EMAIL.split("@")[-1].lower()
+        all_recipients = recipients + cc_list
         if "gmail" in domain:
-            # Gmail: try port 587 (STARTTLS) — more firewall-friendly than 465
             with smtplib.SMTP("smtp.gmail.com", 587) as srv:
                 srv.ehlo()
                 srv.starttls()
                 srv.ehlo()
                 srv.login(SMTP_EMAIL, SMTP_PASSWORD)
-                srv.sendmail(SMTP_EMAIL, recipients, msg.as_string())
+                srv.sendmail(SMTP_EMAIL, all_recipients, msg.as_string())
         else:
-            # Outlook / Office 365 / Microsoft 365: STARTTLS on port 587
             with smtplib.SMTP("smtp.office365.com", 587) as srv:
                 srv.ehlo()
                 srv.starttls()
                 srv.ehlo()
                 srv.login(SMTP_EMAIL, SMTP_PASSWORD)
-                srv.sendmail(SMTP_EMAIL, recipients, msg.as_string())
+                srv.sendmail(SMTP_EMAIL, all_recipients, msg.as_string())
 
         log.info(f"📧 Email sent → {subject}")
     except smtplib.SMTPAuthenticationError:
