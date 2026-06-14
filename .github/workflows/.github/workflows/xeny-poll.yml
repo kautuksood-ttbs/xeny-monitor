@@ -1,0 +1,69 @@
+name: Xeny Monitor — Poll Every 15 Min
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # Every 15 minutes (script skips if outside 8AM-10PM IST)
+  workflow_dispatch:           # Allows manual trigger from GitHub website
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Restore state from previous run (zero-counts + alert cooldown)
+      - name: Restore monitor state
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: xeny-state-never-match
+          restore-keys: xeny-state-
+
+      # Cache Playwright browser so it doesn't re-download every run
+      - name: Cache Playwright Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-v1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install Python packages
+        run: pip install playwright pytz schedule
+
+      - name: Install Chromium (first time only — cached after)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: playwright install --with-deps chromium
+
+      - name: Install Chromium system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: playwright install-deps chromium
+
+      - name: Run poll
+        env:
+          XENY_EMAIL:    ${{ secrets.XENY_EMAIL }}
+          XENY_PASSWORD: ${{ secrets.XENY_PASSWORD }}
+          SMTP_EMAIL:    ${{ secrets.SMTP_EMAIL }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: python xeny_monitor.py --mode poll
+
+      # Save updated state for next run
+      - name: Save monitor state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: state.json
+          key: xeny-state-${{ github.run_id }}
