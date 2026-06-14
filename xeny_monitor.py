@@ -28,6 +28,7 @@ import pytz
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlencode
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 
@@ -450,28 +451,28 @@ def api_get(endpoint: str, params: dict = None) -> dict | None:
 
     url = f"{XENY_BASE_URL}/apis/api/{endpoint}"
     if params:
-        qs = "&".join(f"{k}={v}" for k, v in params.items())
-        url = f"{url}?{qs}"
+        url = f"{url}?{urlencode(params)}"  # FIX V-4: use urlencode, not manual join
 
     fetch_headers = {"Accept": "application/json", **_api_auth_headers}
-    headers_json  = json.dumps(fetch_headers)
 
     try:
-        result = _data_page.evaluate(f"""
-            async () => {{
-                try {{
-                    const r = await fetch("{url}", {{
+        # FIX V-2: Pass url and headers as data arguments, not embedded in JS code.
+        # Playwright serializes the second arg safely — no injection risk.
+        result = _data_page.evaluate("""
+            async ([url, headers]) => {
+                try {
+                    const r = await fetch(url, {
                         method: "GET",
                         credentials: "include",
-                        headers: {headers_json}
-                    }});
-                    if (!r.ok) return {{"_status": r.status, "_url": "{url}"}};
+                        headers: headers
+                    });
+                    if (!r.ok) return { _status: r.status, _url: url };
                     return await r.json();
-                }} catch(e) {{
-                    return {{"_error": e.message}};
-                }}
-            }}
-        """)
+                } catch(e) {
+                    return { _error: e.message };
+                }
+            }
+        """, [url, fetch_headers])
 
         if not result:
             return None
@@ -926,6 +927,38 @@ def _heartbeat_html() -> str:
 #  SCHEDULED JOBS
 # ══════════════════════════════════════════════════════════════
 
+def _monitor_down_html() -> str:
+    """FIX V-3: Email body sent when the monitor itself cannot fetch data."""
+    ts = now_ist().strftime("%d %b %Y, %I:%M %p IST")
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#fef2f2;margin:0;padding:30px;">
+<div style="max-width:500px;margin:0 auto;background:white;border:1px solid #fca5a5;
+  border-radius:10px;overflow:hidden;">
+  <div style="background:#dc2626;padding:16px 20px;">
+    <span style="color:white;font-size:16px;font-weight:700;">
+      XENY MONITOR — Self-Check Failed
+    </span>
+  </div>
+  <div style="padding:20px;font-size:14px;color:#374151;line-height:1.8;">
+    The monitoring script ran at <strong>{ts}</strong> but could NOT
+    fetch data from Xeny.ai. No alert checks were performed this cycle.<br><br>
+    <strong>Possible causes:</strong><br>
+    &bull; Xeny.ai login credentials have expired or changed<br>
+    &bull; Xeny.ai platform is down or unreachable<br>
+    &bull; GitHub Actions network issue<br>
+    &bull; Xeny.ai changed their internal API structure<br><br>
+    <strong>Action required:</strong><br>
+    1. Log in to app.xeny.ai and verify the platform is up.<br>
+    2. Check GitHub Actions logs for the specific error message.<br>
+    3. Verify XENY_EMAIL and XENY_PASSWORD secrets are still valid.
+  </div>
+  <div style="background:#f9fafb;padding:10px 20px;font-size:11px;color:#9ca3af;">
+    Auto-generated self-check alert · Technotask Business Solutions
+  </div>
+</div>
+</body></html>"""
+
+
 def job_poll():
     """15-minute polling job — alert on anomalies during business hours."""
     h = now_ist().hour
@@ -941,24 +974,31 @@ def job_poll():
 
     if not t_rows:
         log.warning("No client data returned — possible auth or network issue")
+        # FIX V-3: Alert when the monitor itself cannot fetch data.
+        # 2-hour cooldown prevents email flooding if issue persists across many polls.
+        if _can_alert("MONITOR_SELF_DOWN"):
+            send_email(
+                "⚠️ ALERT: Xeny Monitor Failed to Fetch Data — Check Credentials",
+                _monitor_down_html()
+            )
         return
 
     # ── Platform-wide outage check ──
     active_today = [r for r in t_rows if any(_match(r, n) for n in ACTIVE_NAMES)]
-    all_zero     = all(_get(r, "totalCallConnected") == 0 and
-                       _get(r, "totalCallScheduled")  == 0
-                       for r in active_today) if active_today else False
 
-    # Only fire platform outage if calls ARE scheduled but NONE connect
-    # (scheduled=0 at night is normal end-of-day — not an outage)
-    all_scheduled_zero = all(_get(r, "totalCallScheduled") == 0 for r in active_today)
-    if all_zero and active_today and not all_scheduled_zero and _can_alert("PLATFORM_OUTAGE"):
+    # FIX V-1: Correct logic — outage = ANY client has scheduled calls but
+    # ALL connected calls across active clients are zero.
+    # Previous code checked all_zero (both scheduled AND connected = 0),
+    # which created a logical impossibility with the not all_scheduled_zero guard.
+    any_have_scheduled = any(_get(r, "totalCallScheduled") > 0 for r in active_today)
+    all_connected_zero = all(_get(r, "totalCallConnected") == 0 for r in active_today)
+    if active_today and any_have_scheduled and all_connected_zero and _can_alert("PLATFORM_OUTAGE"):
         html = _alert_html(t_rows, d1_rows, "CRITICAL",
             "🚨 ALL active clients showing ZERO connected calls despite scheduled campaigns — "
             "Possible platform-wide dialer failure")
         send_email("🚨 PLATFORM OUTAGE: All Xeny.ai clients at ZERO calls", html)
         log.warning("CRITICAL: Platform-wide zero-call alert fired")
-        return  # No need to check per-client if everything is zero
+        return  # No need to check per-client if platform is fully down
 
     # ── Per-client checks ──
     for ac in ACTIVE_CLIENTS:
