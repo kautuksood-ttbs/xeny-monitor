@@ -1,8 +1,0 @@
-state.json
-xeny_monitor.log
-*.log
-__pycache__/
-*.pyc
-.env
-.DS_Store
-Thumbs.db
