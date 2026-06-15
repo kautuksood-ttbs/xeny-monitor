@@ -1074,6 +1074,10 @@ def job_day_closing():
         log.warning("Day closing: no data for yesterday — email skipped")
         return
 
+    # DEBUG: log actual API field names so we can verify field name mapping
+    log.info(f"DEBUG y_rows[0] keys: {list(y_rows[0].keys()) if y_rows else 'empty'}")
+    log.info(f"DEBUG y_rows[0] values: {y_rows[0] if y_rows else 'empty'}")
+
     html = _day_closing_html(y_rows, d2_rows, y_sum, d2_sum)
     send_email(f"📊 Xeny Day Closing — {yd} | Day-on-Day Report", html)
 
