@@ -618,12 +618,12 @@ def _alert_html(today_rows: list, d1_rows: list, severity: str, headline: str) -
         if not tc:
             continue
 
-        t_sched  = _get(tc, "totalCallScheduled")
-        t_conn   = _get(tc, "totalCallConnected")
-        t_fail   = _get(tc, "totalCallNotConnected", "totalCallFailed")
-        t_min    = _get(tc, "totalMinutesUsed")
+        t_sched  = _get(tc, "totalCalls")
+        t_conn   = _get(tc, "connectedCalls")
+        t_fail   = _get(tc, "notConnectedOrFailedCalls")
+        t_min    = _get(tc, "minutesConsumed")
         t_rev    = _get(tc, "totalRevenue")
-        d_conn   = _get(dc, "totalCallConnected")
+        d_conn   = _get(dc, "connectedCalls")
 
         fail_pct = round(t_fail / t_sched * 100, 1) if t_sched else 0
         delta    = t_conn - d_conn
@@ -690,14 +690,14 @@ def _day_closing_html(yest_rows: list, d2_rows: list,
     def _sum(rows, *keys):
         return sum(_get(r, *keys) for r in rows)
 
-    y_sched = _sum(yest_rows, "totalCallScheduled")
-    y_conn  = _sum(yest_rows, "totalCallConnected")
-    y_fail  = _sum(yest_rows, "totalCallNotConnected", "totalCallFailed")
-    y_mins  = _sum(yest_rows, "totalMinutesUsed")
-    y_rev   = _sum(yest_rows, "totalRevenue", "totalRevenueINR")
+    y_sched = _sum(yest_rows, "totalCalls")
+    y_conn  = _sum(yest_rows, "connectedCalls")
+    y_fail  = _sum(yest_rows, "notConnectedOrFailedCalls")
+    y_mins  = _sum(yest_rows, "minutesConsumed")
+    y_rev   = _sum(yest_rows, "totalRevenue")
 
-    d2_conn = _sum(d2_rows, "totalCallConnected")
-    d2_rev  = _sum(d2_rows, "totalRevenue", "totalRevenueINR")
+    d2_conn = _sum(d2_rows, "connectedCalls")
+    d2_rev  = _sum(d2_rows, "totalRevenue")
 
     conn_delta = y_conn - d2_conn
     rev_delta  = y_rev  - d2_rev
@@ -716,13 +716,13 @@ def _day_closing_html(yest_rows: list, d2_rows: list,
         yc = client_row(yest_rows, ac["name"])
         dc = client_row(d2_rows,   ac["name"])
 
-        y_s  = _get(yc, "totalCallScheduled")
-        y_c  = _get(yc, "totalCallConnected")
-        y_f  = _get(yc, "totalCallNotConnected", "totalCallFailed")
-        y_m  = _get(yc, "totalMinutesUsed")
+        y_s  = _get(yc, "totalCalls")
+        y_c  = _get(yc, "connectedCalls")
+        y_f  = _get(yc, "notConnectedOrFailedCalls")
+        y_m  = _get(yc, "minutesConsumed")
         y_r  = _get(yc, "totalRevenue")
 
-        d_c  = _get(dc, "totalCallConnected")
+        d_c  = _get(dc, "connectedCalls")
         fail = round(y_f / y_s * 100, 1) if y_s > 0 else 0
 
         dc_delta = y_c - d_c
@@ -1000,8 +1000,8 @@ def job_poll():
     # ALL connected calls across active clients are zero.
     # Previous code checked all_zero (both scheduled AND connected = 0),
     # which created a logical impossibility with the not all_scheduled_zero guard.
-    any_have_scheduled = any(_get(r, "totalCallScheduled") > 0 for r in active_today)
-    all_connected_zero = all(_get(r, "totalCallConnected") == 0 for r in active_today)
+    any_have_scheduled = any(_get(r, "totalCalls") > 0 for r in active_today)
+    all_connected_zero = all(_get(r, "connectedCalls") == 0 for r in active_today)
     if active_today and any_have_scheduled and all_connected_zero and _can_alert("PLATFORM_OUTAGE"):
         html = _alert_html(t_rows, d1_rows, "CRITICAL",
             "🚨 ALL active clients showing ZERO connected calls despite scheduled campaigns — "
@@ -1016,10 +1016,10 @@ def job_poll():
         tc     = client_row(t_rows, name)
         dc     = client_row(d1_rows, name)
 
-        t_conn  = _get(tc, "totalCallConnected")
-        t_sched = _get(tc, "totalCallScheduled")
-        t_fail  = _get(tc, "totalCallNotConnected", "totalCallFailed")
-        d1_conn = _get(dc, "totalCallConnected")
+        t_conn  = _get(tc, "connectedCalls")
+        t_sched = _get(tc, "totalCalls")
+        t_fail  = _get(tc, "notConnectedOrFailedCalls")
+        d1_conn = _get(dc, "connectedCalls")
         fail_pct = round(t_fail / t_sched * 100, 1) if t_sched else 0
 
         # ── Zero call tracker ──
@@ -1073,10 +1073,6 @@ def job_day_closing():
     if not y_rows:
         log.warning("Day closing: no data for yesterday — email skipped")
         return
-
-    # DEBUG: log actual API field names so we can verify field name mapping
-    log.info(f"DEBUG y_rows[0] keys: {list(y_rows[0].keys()) if y_rows else 'empty'}")
-    log.info(f"DEBUG y_rows[0] values: {y_rows[0] if y_rows else 'empty'}")
 
     html = _day_closing_html(y_rows, d2_rows, y_sum, d2_sum)
     send_email(f"📊 Xeny Day Closing — {yd} | Day-on-Day Report", html)
