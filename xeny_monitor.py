@@ -133,13 +133,20 @@ def _match(client_row: dict, name: str) -> bool:
     return name.lower() in row_name or row_name in name.lower()
 
 def _get(d: dict, *keys, default=0):
-    """Safe dict lookup; coerces strings to int/float so format specs work."""
+    """Safe dict lookup; coerces strings to int/float so format specs work.
+    Handles currency strings like 'INR 775.00' or 'AED 0.00' by stripping prefix."""
     for k in keys:
         if k in d and d[k] is not None:
             v = d[k]
             if isinstance(v, str):
+                # Strip currency prefixes like "INR ", "AED " before parsing
+                stripped = v.strip()
+                for prefix in ("INR ", "AED ", "₹", "$", "€"):
+                    if stripped.startswith(prefix):
+                        stripped = stripped[len(prefix):].strip()
+                        break
                 try:
-                    return float(v) if "." in v else int(v)
+                    return float(stripped) if "." in stripped else int(stripped)
                 except (ValueError, TypeError):
                     return default
             return v
@@ -679,15 +686,18 @@ def _day_closing_html(yest_rows: list, d2_rows: list,
     d2_label   = day_before()
     gen_date   = now_ist().strftime("%d %b %Y")
 
-    # ── Platform-level numbers ──
-    y_sched = _get(yest_sum, "totalCallScheduled")
-    y_conn  = _get(yest_sum, "totalCallConnected")
-    y_fail  = _get(yest_sum, "totalCallNotConnected", "totalCallFailed")
-    y_mins  = _get(yest_sum, "totalMinutesUsed")
-    y_rev   = _get(yest_sum, "totalRevenueINR", "totalRevenue")
+    # ── Platform-level numbers (summed from client rows — more reliable than summary endpoint) ──
+    def _sum(rows, *keys):
+        return sum(_get(r, *keys) for r in rows)
 
-    d2_conn = _get(d2_sum, "totalCallConnected")
-    d2_rev  = _get(d2_sum, "totalRevenueINR", "totalRevenue")
+    y_sched = _sum(yest_rows, "totalCallScheduled")
+    y_conn  = _sum(yest_rows, "totalCallConnected")
+    y_fail  = _sum(yest_rows, "totalCallNotConnected", "totalCallFailed")
+    y_mins  = _sum(yest_rows, "totalMinutesUsed")
+    y_rev   = _sum(yest_rows, "totalRevenue", "totalRevenueINR")
+
+    d2_conn = _sum(d2_rows, "totalCallConnected")
+    d2_rev  = _sum(d2_rows, "totalRevenue", "totalRevenueINR")
 
     conn_delta = y_conn - d2_conn
     rev_delta  = y_rev  - d2_rev
