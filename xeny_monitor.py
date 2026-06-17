@@ -51,6 +51,9 @@ ALERT_RECIPIENTS = [
 
 ALERT_CC = [
     "Rajib.Ray@technotaskglobal.com",
+    "talib.ahmed@triotech.in",
+    "krishnakant.soni@triotech.in",
+    "devmotwani000@gmail.com",
 ]
 
 IST             = pytz.timezone("Asia/Kolkata")
